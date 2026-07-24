@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# macOS / exFAT AppleDouble artifacts
+._*
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
