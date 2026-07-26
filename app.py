@@ -46,6 +46,13 @@ AFFILIATIONS = (
 # 0.001 ≈ 100m. Reduces GeoJSON payload while preserving recognizable shapes.
 SIMPLIFICATION_TOLERANCE = 0.001
 
+# Choropleth graduation on servicesheds, based on prc_passiv (% passivas).
+# 5 stops sampled from the ColorBrewer "Reds" scheme (#fff5f0 -> #67000d).
+SERVICESHED_BREAKS = [0, 20, 40, 60, 80, float("inf")]
+SERVICESHED_COLORS = ["#fff5f0", "#fcbba1", "#fb6a4a", "#cb181d", "#67000d"]
+SERVICESHED_NODATA_COLOR = "#cccccc"
+SERVICESHED_FIELD = "prc_passiv"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -97,6 +104,24 @@ def simplify_gdf(gdf: gpd.GeoDataFrame, tolerance: float) -> gpd.GeoDataFrame:
     return gdf_simplified
 
 
+def serviceshed_fill_color(value) -> str:
+    """Map a prc_passiv value to one of 5 choropleth colors by bin.
+
+    Bins: [0,20), [20,40), [40,60), [60,80), [80, inf). Values that are
+    missing, NaN, or negative fall back to the no-data color.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return SERVICESHED_NODATA_COLOR
+    if v != v or v < 0:  # NaN or negative
+        return SERVICESHED_NODATA_COLOR
+    for i in range(len(SERVICESHED_BREAKS) - 1):
+        if SERVICESHED_BREAKS[i] <= v < SERVICESHED_BREAKS[i + 1]:
+            return SERVICESHED_COLORS[i]
+    return SERVICESHED_COLORS[-1]
+
+
 # ---------------------------------------------------------------------------
 # Static assets
 # ---------------------------------------------------------------------------
@@ -122,6 +147,10 @@ def load_servicesheds():
     if gdf.crs is not None and str(gdf.crs).upper() != "EPSG:4326":
         gdf = gdf.to_crs("EPSG:4326")
     gdf = simplify_gdf(gdf, tolerance=SIMPLIFICATION_TOLERANCE)
+    # Pre-formatted label for the hover tooltip (folium has no suffix option).
+    gdf["prc_passiv_label"] = gdf["prc_passiv"].map(
+        lambda v: f"{v:.2f}%" if v is not None and v == v else "N/A"
+    )
     return gdf
 
 
@@ -158,7 +187,7 @@ def build_map(servicesheds_geojson, streams_geojson):
     bounds = gdf.total_bounds  # [minx, miny, maxx, maxy] in lon/lat
     center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
 
-    m = folium.Map(location=center, zoom_start=9, tiles="OpenStreetMap")
+    m = folium.Map(location=center, zoom_start=9, tiles=None)
 
     # --- Basemap layers ---
     folium.TileLayer(
@@ -177,25 +206,29 @@ def build_map(servicesheds_geojson, streams_geojson):
         control=True,
     ).add_to(m)
 
-    # --- Servicesheds (50% opacity) ---
+    # --- Servicesheds: choropleth on prc_passiv (% passivas) ---
+    def style_serviceshed(feature):
+        value = feature.get("properties", {}).get(SERVICESHED_FIELD)
+        return {
+            "fillColor": serviceshed_fill_color(value),
+            "color": "#67000d",
+            "weight": 0.5,
+            "fillOpacity": 0.7,
+        }
+
     folium.GeoJson(
         servicesheds_geojson,
         name="Bacias Abastecedoras",
-        style_function=lambda feature: {
-            "fillColor": "#2ca25f",
-            "color": "#006d2c",
-            "weight": 1,
-            "fillOpacity": 0.5,
-        },
+        style_function=style_serviceshed,
         tooltip=folium.GeoJsonTooltip(
-            fields=["Km2", "prc_passiv"],
-            aliases=["Area (km2):", "% passivas:"],
-            localize=True,
+            fields=["prc_passiv_label"],
+            aliases=["Percentagem passivo APP &amp; RL:"],
+            labels=True,
         ),
         highlight_function=lambda feature: {
-            "weight": 3,
+            "weight": 2,
             "color": "#000000",
-            "fillOpacity": 0.7,
+            "fillOpacity": 0.85,
         },
     ).add_to(m)
 
@@ -208,10 +241,6 @@ def build_map(servicesheds_geojson, streams_geojson):
             "weight": 1.2,
             "opacity": 0.9,
         },
-        tooltip=folium.GeoJsonTooltip(
-            fields=["grid_code"],
-            aliases=["Ordem:"],
-        ),
     ).add_to(m)
 
     # --- Layer control ---
@@ -265,6 +294,18 @@ def main():
     servicesheds_geojson = get_servicesheds_geojson()
     streams_geojson = get_streams_geojson()
 
+    # Session token bumped by the "Restaurar zoom" button. Changing the
+    # st_folium key forces the component to remount and re-apply the map's
+    # fit_bounds, snapping the view back to the initial extent.
+    if "map_view_token" not in st.session_state:
+        st.session_state.map_view_token = 0
+
+    _, btn_col, _ = st.columns([1, 1, 1])
+    with btn_col:
+        if st.button("Restaurar zoom", use_container_width=True):
+            st.session_state.map_view_token += 1
+            st.rerun()
+
     with st.spinner("Carregando mapa..."):
         m = build_map(servicesheds_geojson, streams_geojson)
 
@@ -273,6 +314,7 @@ def main():
         width="100%",
         height=600,
         returned_objects=[],
+        key=f"map_{st.session_state.map_view_token}",
     )
 
 
