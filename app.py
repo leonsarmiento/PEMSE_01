@@ -405,7 +405,7 @@ def build_map(servicesheds_geojson, streams_geojson, selected_ws_id=None):
     ).add_to(m)
 
     # --- Layer control ---
-    folium.LayerControl(collapsed=False).add_to(m)
+    folium.LayerControl(collapsed=True).add_to(m)
 
     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
     return m
