@@ -468,6 +468,13 @@ def main():
             st.session_state.map_view_token += 1
             st.rerun()
 
+    # --- Instruction line above the map (only when nothing is selected) ---
+    if st.session_state.selected_ws_id is None:
+        st.info(
+            "Clique em uma bacia abastecedora no mapa para visualizar "
+            "os gráficos de fronteira de Pareto."
+        )
+
     with st.spinner("Carregando mapa..."):
         m = build_map(
             servicesheds_geojson,
@@ -478,7 +485,7 @@ def main():
     map_output = st_folium(
         m,
         width="100%",
-        height=600,
+        height=450,
         returned_objects=["last_clicked"],
         key=f"map_{st.session_state.map_view_token}",
     )
@@ -494,12 +501,7 @@ def main():
     # --- Pareto frontier plots below the map ---
     st.markdown("---")
     selected_ws_id = st.session_state.selected_ws_id
-    if selected_ws_id is None:
-        st.info(
-            "Clique em uma bacia abastecedora no mapa para visualizar "
-            "os gráficos de fronteira de Pareto."
-        )
-    else:
+    if selected_ws_id is not None:
         ws_name = WATERSHED_NAMES.get(selected_ws_id, f"WS {selected_ws_id}")
         st.markdown(
             f"<h3 style='text-align:center; margin-bottom:0.4rem;'>"
