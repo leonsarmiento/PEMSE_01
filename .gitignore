@@ -8,3 +8,6 @@ __pycache__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local agent instructions (not for the repo)
+agents.md
