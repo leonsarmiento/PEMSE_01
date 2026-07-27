@@ -383,7 +383,7 @@ def build_map(servicesheds_geojson, streams_geojson, selected_ws_id=None):
         style_function=style_serviceshed,
         tooltip=folium.GeoJsonTooltip(
             fields=["prc_passiv_label"],
-            aliases=["Percentagem passivo APP &amp; RL:"],
+            aliases=["Porcentagem passivo APP &amp; RL:"],
             labels=True,
         ),
         highlight_function=lambda feature: {

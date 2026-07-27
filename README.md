@@ -11,7 +11,7 @@ Janeiro, Brazil. Built with Streamlit + Folium.
   choropleth on `% passivas APP & RL` (5-stop Reds ramp, bins 0-20-40-60-80),
   overlaid with the stream network (`Rede de Drenagem`).
 - Basemap switcher (OpenStreetMap / Esri satellite) and layer toggle.
-- Hover tooltip on each serviceshed showing `Percentagem passivo APP & RL`.
+- Hover tooltip on each serviceshed showing `Porcentagem passivo APP & RL`.
 - **Restaurar zoom** button to snap the view back to the initial extent.
 - Click a serviceshed to:
   - Fit the map to that feature and outline it in blue.
