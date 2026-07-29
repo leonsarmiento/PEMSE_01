@@ -40,9 +40,9 @@ AUTHORS = "Jorge Leon Sarmiento<sup>(1)</sup>, Claudia Moster<sup>(2)</sup>"
 
 AFFILIATIONS = (
     "<sup>(1)</sup> Natural Capital Insights / UFRRJ / Laborat&oacute;rio de "
-    "Modelagem de Bacias Hidrogr&aacute;ficas (LMBH) Grupo de Pesquisa PEMSE, "
+    "Manejo de Bacias Hidrogr&aacute;ficas (LMBH) Grupo de Pesquisa PEMSE, "
     "Serop&eacute;dica-RJ, Brasil;<br>"
-    "<sup>(2)</sup> UFRRJ / Laborat&oacute;rio de Modelagem de Bacias "
+    "<sup>(2)</sup> UFRRJ / Laborat&oacute;rio de Manejo de Bacias "
     "Hidrogr&aacute;ficas (LMBH) / Comite de Bacia GUANDU, Serop&eacute;dica-RJ, "
     "Brasil."
 )
