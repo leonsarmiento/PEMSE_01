@@ -12,6 +12,7 @@ from pathlib import Path
 import folium
 import geopandas as gpd
 import matplotlib
+import pandas as pd
 import streamlit as st
 from matplotlib import pyplot as plt
 from shapely import simplify as shp_simplify
@@ -103,6 +104,42 @@ SCENARIO_MARKERS = {
 SCENARIO_LABELS = {
     "b": "Baseline", "a": "APP", "r": "Legal Reserve", "ar": "APP + RL",
     "p10": "Priority 10%", "p25": "Priority 25%", "p50": "Priority 50%",
+}
+
+# --- Passivo Ambiental breakdown (pixel counts) ---
+# APP_count / RL_count: total APP / RL area that should be forested.
+# APP_RL: union of APP and RL (denominator of prc_passiv).
+# Mask_count: the unfilled share (Passivo Ambiental) of the APP+RL union.
+# Mask_*_c*: pixels each scenario assumed to restore out of the passivo gap.
+PASSIVO_TOTAL_FIELDS = {
+    "app_total":    "APP_count",
+    "rl_total":     "RL_count",
+    "app_rl_total": "APP_RL",
+    "passivo":      "Mask_count",
+}
+PASSIVO_SCENARIO_FIELDS = {
+    "a":   "Mask_a_cou",
+    "r":   "Mask_r_cou",
+    "ar":  "Mask_ar_co",
+    "p10": "Mask_p10_c",
+    "p25": "Mask_p25_c",
+    "p50": "Mask_p50_c",
+}
+# Non-baseline scenarios shown in the Passivo panel/table.
+PASSIVO_SCENARIO_KEYS = ["a", "r", "ar", "p10", "p25", "p50"]
+
+# Colors for the totals panel; APP/RL/APP+RL reuse the scenario palette.
+PASSIVO_TOTAL_COLORS = {
+    "app_total":    "#2196F3",
+    "rl_total":     "#4CAF50",
+    "app_rl_total": "#9C27B0",
+    "passivo":      "#cb181d",
+}
+PASSIVO_TOTAL_LABELS = {
+    "app_total":    "APP (total)",
+    "rl_total":     "RL (total)",
+    "app_rl_total": "APP + RL (total)",
+    "passivo":      "Passivo Ambiental",
 }
 
 # Named watersheds for plot titles (from scripts/pareto_frontier_plots.py).
@@ -245,7 +282,7 @@ def render_pareto_figure(ws_id_nest: int, data: dict):
             )
 
         ax.set_title(service_name, fontsize=21, fontweight="bold")
-        ax.set_xlabel("Intervened Area (ha)", fontsize=18)
+        ax.set_xlabel("Área Intervencionada (ha)", fontsize=18)
         ax.set_ylabel(service_name, fontsize=18)
         ax.tick_params(axis="both", labelsize=14)
         ax.grid(True, alpha=0.3)
@@ -266,6 +303,151 @@ def render_pareto_figure(ws_id_nest: int, data: dict):
 
     plt.tight_layout(rect=[0, 0.06, 1, 0.94])
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Passivo Ambiental breakdown
+# ---------------------------------------------------------------------------
+
+
+@st.cache_data(ttl=3600)
+def compute_passivo_data(ws_id_nest: int):
+    """Compute the Passivo Ambiental breakdown (pixel counts + hectares) for a serviceshed.
+
+    Returns a dict with per-category pixel counts, hectares (= pixels * PIXEL_AREA_HA),
+    the recorded prc_passiv, and prc_passiv recomputed from Mask_count / APP_RL for
+    sanity. Returns None if the serviceshed is not found.
+    """
+    gdf = load_servicesheds()
+    row = gdf[gdf["ws_id_nest"] == ws_id_nest]
+    if row.empty:
+        return None
+    r = row.iloc[0]
+
+    def _num(value):
+        """Return float(value), mapping missing/NaN to 0 (used for totals)."""
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        return v if v == v else 0.0
+
+    def _num_or_nan(value):
+        """Return float(value), preserving NaN (used for scenario masks)."""
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return float("nan")
+        return v
+
+    pixels = {k: _num(r[PASSIVO_TOTAL_FIELDS[k]]) for k in PASSIVO_TOTAL_FIELDS}
+    pixels["scenarios"] = {
+        sc: _num_or_nan(r[PASSIVO_SCENARIO_FIELDS[sc]]) for sc in PASSIVO_SCENARIO_KEYS
+    }
+
+    ha = {k: pixels[k] * PIXEL_AREA_HA for k in PASSIVO_TOTAL_FIELDS}
+    ha["scenarios"] = {
+        sc: pixels["scenarios"][sc] * PIXEL_AREA_HA for sc in PASSIVO_SCENARIO_KEYS
+    }
+
+    app_rl = pixels["app_rl_total"]
+    prc_calc = (pixels["passivo"] / app_rl * 100) if app_rl > 0 else float("nan")
+
+    return {
+        "pixels": pixels,
+        "ha": ha,
+        "prc_passiv": float(r["prc_passiv"]),
+        "prc_passiv_calc": prc_calc,
+    }
+
+
+def render_passivo_figure(ws_id_nest: int, data: dict):
+    """Two-panel figure: totals + passivo gap (left) and scenario restoration (right)."""
+    ha = data["ha"]
+    passivo_ha = ha["passivo"]
+
+    fig, (ax_tot, ax_scn) = plt.subplots(1, 2, figsize=(14, 5.5))
+
+    # --- Left: APP / RL / APP+RL / Passivo ---
+    tot_keys = ["app_total", "rl_total", "app_rl_total", "passivo"]
+    tot_vals = [ha[k] for k in tot_keys]
+    tot_cols = [PASSIVO_TOTAL_COLORS[k] for k in tot_keys]
+    tot_lbls = [PASSIVO_TOTAL_LABELS[k] for k in tot_keys]
+    y_tot = list(range(len(tot_keys)))
+    bars_tot = ax_tot.barh(y_tot, tot_vals, color=tot_cols,
+                           edgecolor="white", linewidth=1.5)
+    ax_tot.set_yticks(y_tot)
+    ax_tot.set_yticklabels(tot_lbls, fontsize=13)
+    ax_tot.invert_yaxis()
+    ax_tot.set_xlabel("Hectares (ha)", fontsize=14)
+    ax_tot.set_title("Área e Passivo Ambiental", fontsize=17, fontweight="bold")
+    ax_tot.grid(True, axis="x", alpha=0.3)
+    x_max_tot = max(tot_vals) if max(tot_vals) > 0 else 1.0
+    for b, v in zip(bars_tot, tot_vals):
+        ax_tot.text(b.get_width() + x_max_tot * 0.01,
+                    b.get_y() + b.get_height() / 2,
+                    f"{v:,.1f}", va="center", fontsize=12)
+    ax_tot.set_xlim(0, x_max_tot * 1.18)
+
+    # --- Right: scenario restoration vs passivo gap ---
+    scn_keys = PASSIVO_SCENARIO_KEYS
+    scn_vals = [ha["scenarios"][sc] for sc in scn_keys]  # may contain NaN
+    scn_plot = [0.0 if v != v else v for v in scn_vals]  # NaN -> 0 for bars
+    scn_cols = [SCENARIO_COLORS[sc] for sc in scn_keys]
+    scn_lbls = [SCENARIO_LABELS[sc] for sc in scn_keys]
+    y_scn = list(range(len(scn_keys)))
+    bars_scn = ax_scn.barh(y_scn, scn_plot, color=scn_cols,
+                           edgecolor="white", linewidth=1.5)
+    ax_scn.set_yticks(y_scn)
+    ax_scn.set_yticklabels(scn_lbls, fontsize=13)
+    ax_scn.invert_yaxis()
+    ax_scn.set_xlabel("Hectares (ha)", fontsize=14)
+    ax_scn.set_title("Restauração por cenário vs Passivo",
+                     fontsize=17, fontweight="bold")
+    ax_scn.grid(True, axis="x", alpha=0.3)
+    finite_vals = [v for v in scn_vals + [passivo_ha] if v == v and v > 0]
+    x_max_scn = max(finite_vals) if finite_vals else 1.0
+    ax_scn.axvline(passivo_ha, color="#cb181d", linestyle="--",
+                   linewidth=2, alpha=0.85)
+    ax_scn.text(passivo_ha + x_max_scn * 0.01, len(scn_keys) - 0.6,
+                f"Passivo {passivo_ha:,.1f} ha", color="#cb181d",
+                fontsize=12, fontweight="bold", va="center")
+    for b, v in zip(bars_scn, scn_vals):
+        if v == v and v > 0:
+            ax_scn.text(b.get_width() + x_max_scn * 0.01,
+                        b.get_y() + b.get_height() / 2,
+                        f"{v:,.1f}", va="center", fontsize=12)
+    ax_scn.set_xlim(0, x_max_scn * 1.18)
+
+    ws_name = WATERSHED_NAMES.get(ws_id_nest, f"WS {ws_id_nest}")
+    fig.suptitle(f"Passivo Ambiental — {ws_name}",
+                 fontsize=21, fontweight="bold", y=1.0)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    return fig
+
+
+def passivo_scenario_table(data: dict) -> pd.DataFrame:
+    """Per-scenario restored hectares and share of the passivo gap."""
+    ha = data["ha"]
+    passivo_ha = ha["passivo"]
+    rows = []
+    for sc in PASSIVO_SCENARIO_KEYS:
+        v = ha["scenarios"][sc]
+        # Re-detect NaN via the original pixels (ha already coerced to 0).
+        raw = data["pixels"]["scenarios"][sc]
+        if raw != raw:  # NaN
+            ha_str, pct_str = "—", "—"
+        else:
+            ha_str = f"{v:,.1f}"
+            pct_str = (f"{v / passivo_ha * 100:,.1f}%"
+                       if passivo_ha > 0 else "—")
+        rows.append({
+            "Cenário": SCENARIO_LABELS[sc],
+            "Área restaurada (ha)": ha_str,
+            "% do Passivo": pct_str,
+        })
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +654,7 @@ def main():
     if st.session_state.selected_ws_id is None:
         st.info(
             "Clique em uma bacia abastecedora no mapa para visualizar "
-            "os gráficos de fronteira de Pareto."
+            "o Passivo Ambiental e os gráficos de fronteira de Pareto."
         )
 
     with st.spinner("Carregando mapa..."):
@@ -498,11 +680,46 @@ def main():
             st.session_state.selected_ws_id = clicked_ws
             st.rerun()
 
-    # --- Pareto frontier plots below the map ---
+    # --- Selected-serviceshed analytics below the map ---
     st.markdown("---")
     selected_ws_id = st.session_state.selected_ws_id
     if selected_ws_id is not None:
         ws_name = WATERSHED_NAMES.get(selected_ws_id, f"WS {selected_ws_id}")
+
+        # === Passivo Ambiental (shown above the Pareto plots) ===
+        passivo_data = compute_passivo_data(selected_ws_id)
+        if passivo_data is None:
+            st.warning(f"Sem dados de passivo para a bacia {selected_ws_id}.")
+        else:
+            st.markdown(
+                f"<h3 style='text-align:center; margin-bottom:0.4rem;'>"
+                f"Passivo Ambiental — {ws_name}"
+                f"</h3>",
+                unsafe_allow_html=True,
+            )
+            ha = passivo_data["ha"]
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("APP (ha)", f"{ha['app_total']:,.1f}")
+            m2.metric("RL (ha)", f"{ha['rl_total']:,.1f}")
+            m3.metric("Passivo Ambiental (ha)", f"{ha['passivo']:,.1f}")
+            m4.metric("% Passivo (APP + RL)",
+                      f"{passivo_data['prc_passiv']:.1f}%")
+
+            pfig = render_passivo_figure(selected_ws_id, passivo_data)
+            st.pyplot(pfig, use_container_width=True)
+            plt.close(pfig)
+
+            st.markdown("**Restauração por cenário**")
+            st.table(passivo_scenario_table(passivo_data))
+            st.caption(
+                f"Conversão: 1 pixel = {PIXEL_AREA_HA:.4f} ha. "
+                f"Verificação: Mask_count / (APP + RL) = "
+                f"{passivo_data['prc_passiv_calc']:.2f}% "
+                f"≈ campo prc_passiv ({passivo_data['prc_passiv']:.2f}%)."
+            )
+
+        # === Pareto frontier plots ===
+        st.markdown("---")
         st.markdown(
             f"<h3 style='text-align:center; margin-bottom:0.4rem;'>"
             f"Fronteira de Pareto — {ws_name}"

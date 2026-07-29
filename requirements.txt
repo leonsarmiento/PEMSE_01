@@ -2,5 +2,6 @@ streamlit>=1.30
 folium>=0.15
 streamlit-folium>=0.18
 geopandas>=0.14
+pandas>=2.0
 matplotlib>=3.5
 shapely>=2.0
